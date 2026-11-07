@@ -7,13 +7,15 @@ Aucun mot de passe WiFi n'est lu, affiché ni stocké.
 Usage :
     python wifi_check.py                       # pi@192.168.1.200 par défaut
     python wifi_check.py --host 192.168.1.200 --user pi
-    python wifi_check.py --add-help MonReseau  # affiche la commande d'ajout (sans l'exécuter)
+    python wifi_check.py --tutorial            # affiche la procédure pour ajouter un nouveau réseau
 """
 import argparse
 import platform
 import shlex
 import subprocess
 import sys
+
+import wifi_tutorial
 
 
 def decode(raw, windows_console=False):
@@ -26,9 +28,9 @@ def decode(raw, windows_console=False):
     return raw.decode("utf-8", errors="replace")
 
 
-def run(cmd, timeout=15, windows_console=False, stdin=None):
+def run(cmd, timeout=15, windows_console=False):
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=timeout, input=stdin)
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:
         return None, str(e)
     out = decode(r.stdout if r.returncode == 0 else r.stderr, windows_console).strip()
@@ -121,48 +123,25 @@ def get_status(host, user):
     return st
 
 
-def add_network(host, user, ssid, psk, sudo_password=""):
-    """ÉCRIT sur le Pi : enregistre un réseau sans y basculer (la session SSH ne coupe pas).
-
-    Les secrets passent par l'entrée standard de ssh : jamais en argument, jamais dans un fichier.
-    Si `sudo_password` est vide, `sudo -n` est utilisé (il faut alors un sudo sans mot de passe).
-    À n'appeler qu'après une action explicite de la personne devant le robot.
-    """
-    q = shlex.quote(ssid)
-    inner = ("IFS= read -r PSK; nmcli connection add type wifi "
-             f"con-name {q} ssid {q} wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"$PSK\" "
-             "connection.autoconnect yes >/dev/null; rc=$?; unset PSK; exit $rc")
-    if sudo_password:
-        # sudo lit la 1re ligne de stdin (son mot de passe), puis bash lit la 2e (le mot de passe WiFi)
-        remote = "sudo -S -p '' bash -c " + shlex.quote(inner)
-        stdin = f"{sudo_password}\n{psk}\n"
-    else:
-        remote = "sudo -n bash -c " + shlex.quote(inner)
-        stdin = f"{psk}\n"
-    code, out = run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-                     f"{user}@{host}", remote],
-                    timeout=30, stdin=stdin.encode("utf-8"))
-    return code == 0, out
+def verdict(st):
+    """Résumé de get_status : unreachable, pc_unknown, ok ou different."""
+    if st["error"]:
+        return "unreachable"
+    if not st["pc"]:
+        return "pc_unknown"
+    return "ok" if st["pc"] in st["known"] else "different"
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default="192.168.1.200")
     ap.add_argument("--user", default="pi")
-    ap.add_argument("--add-help", metavar="SSID",
-                    help="affiche la commande pour ajouter ce réseau (n'exécute rien)")
+    ap.add_argument("--tutorial", action="store_true",
+                    help="affiche la procédure pour ajouter un nouveau réseau (n'exécute rien)")
     args = ap.parse_args()
 
-    if args.add_help:
-        print("À lancer SUR LE PI (en SSH, Gaëlle présente, avant de partir) :\n")
-        q = shlex.quote(args.add_help)
-        print(f"  read -rs -p 'Mot de passe WiFi : ' PSK; echo")
-        print(f"  sudo nmcli connection add type wifi con-name {q} ssid {q} \\")
-        print('      wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$PSK" connection.autoconnect yes')
-        print("  unset PSK")
-        print("\nCette commande ENREGISTRE le réseau sans y basculer : la session SSH en cours ne coupe pas.")
-        print("Le mot de passe est saisi en direct (non affiché), jamais écrit dans un fichier ni ici.")
-        print("Ne supprime pas l'ancien réseau : il sert de secours. Réseau avec portail captif (hôtel, école) : voir docs/wifi-cadrage.md.")
+    if args.tutorial:
+        print(wifi_tutorial.as_text())
         return 0
 
     st = get_status(args.host, args.user)
@@ -180,8 +159,8 @@ def main():
         print(f"\nOK : le robot connaît « {mine} ». Il s'y connectera tout seul s'il est à portée.")
         return 0
     if mine:
-        print(f"\nATTENTION : le robot ne connaît PAS « {mine} ». Ajoute-le AVANT de partir :")
-        print(f"  python wifi_check.py --add-help {shlex.quote(mine)}")
+        print(f"\nATTENTION : le robot ne connaît PAS « {mine} ». Procédure d'ajout :")
+        print("  python wifi_check.py --tutorial")
         return 1
     print("\nImpossible de connaître le WiFi du PC, compare à la main.")
     return 1

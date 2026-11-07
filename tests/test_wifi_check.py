@@ -4,6 +4,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools", "wifi"))
 import wifi_check as w  # noqa: E402
+import wifi_tutorial as t  # noqa: E402
 
 
 class ParseTests(unittest.TestCase):
@@ -28,42 +29,31 @@ class ParseTests(unittest.TestCase):
     def test_remote_list_empty(self):
         self.assertEqual(w.parse_remote_list(""), (None, []))
 
-    def test_add_network_keeps_secrets_out_of_arguments(self):
-        calls = []
+    def test_verdict(self):
+        base = {"error": None, "pc": "A", "known": ["A", "B"]}
+        self.assertEqual(w.verdict(base), "ok")
+        self.assertEqual(w.verdict({**base, "pc": "C"}), "different")
+        self.assertEqual(w.verdict({**base, "pc": None}), "pc_unknown")
+        self.assertEqual(w.verdict({**base, "error": "timeout"}), "unreachable")
 
-        def fake_run(cmd, timeout=15, windows_console=False, stdin=None):
-            calls.append((cmd, stdin))
-            return 0, ""
 
-        original = w.run
-        w.run = fake_run
-        try:
-            ok, _ = w.add_network("h", "pi", "Mon WiFi", "wifipass1234", "pi-secret")
-        finally:
-            w.run = original
-        cmd, stdin = calls[0]
-        self.assertTrue(ok)
-        self.assertNotIn("wifipass1234", " ".join(cmd))
-        self.assertNotIn("pi-secret", " ".join(cmd))
-        self.assertEqual(stdin, b"pi-secret\nwifipass1234\n")
-        self.assertIn("sudo -S", cmd[-1])
+class TutorialTests(unittest.TestCase):
+    def test_every_step_has_title_and_text(self):
+        for step in t.STEPS:
+            self.assertTrue(step["title"] and step["text"])
 
-    def test_add_network_without_sudo_password_uses_sudo_n(self):
-        calls = []
+    def test_commands_never_embed_a_secret(self):
+        cmds = [c for step in t.STEPS for c in step["commands"]]
+        self.assertTrue(cmds)
+        psk_line = [c for c in cmds if "read -rs" in c]
+        self.assertEqual(len(psk_line), 1)  # password typed without echo
+        for c in cmds:
+            self.assertNotRegex(c, r"wifi-sec\.psk\s+[^\"$\s]")  # only the $PSK variable is allowed
 
-        def fake_run(cmd, timeout=15, windows_console=False, stdin=None):
-            calls.append((cmd, stdin))
-            return 0, ""
-
-        original = w.run
-        w.run = fake_run
-        try:
-            w.add_network("h", "pi", "Mon WiFi", "wifipass1234")
-        finally:
-            w.run = original
-        cmd, stdin = calls[0]
-        self.assertIn("sudo -n", cmd[-1])
-        self.assertEqual(stdin, b"wifipass1234\n")
+    def test_text_output_lists_all_steps(self):
+        text = t.as_text()
+        for step in t.STEPS:
+            self.assertIn(step["title"], text)
 
 
 if __name__ == "__main__":
