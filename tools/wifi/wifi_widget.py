@@ -123,8 +123,10 @@ class App(tk.Tk):
         if st["error"]:
             self.robot_lab.config(text="injoignable")
             self.known.config(text="—")
+            detail = (st["error"] or "").splitlines()[-1][:120] if st["error"] else ""
             self.msg.config(fg=WARN, text="Le robot ne répond pas en SSH. Vérifie qu'il est allumé et sur le "
-                            "même réseau que ton PC (ou isolation entre appareils sur un WiFi public).")
+                            "même réseau que ton PC (ou isolation entre appareils sur un WiFi public)."
+                            + (f"\nDétail : {detail}" if detail else ""))
             return
         self.robot_lab.config(text=st["robot"] or "pas de WiFi actif")
         self.known.config(text="\n".join(st["known"]) or "aucun")
@@ -157,9 +159,17 @@ class App(tk.Tk):
         p.pack()
         self.label(f, "Envoyé directement au robot, jamais enregistré sur le PC.",
                    size=10).pack(fill="x", padx=8, pady=(4, 0))
+        self.label(f, "Mot de passe du Pi (sudo)").pack(fill="x", padx=8, pady=(16, 4))
+        p = Pill(f)
+        self.sudo_pw = tk.Entry(p.inner, show="•", bg=CARD, fg=TXT, insertbackground=TXT, bd=0,
+                                highlightthickness=0, font=(FONT, 13))
+        self.sudo_pw.pack(fill="both", expand=True)
+        p.pack()
+        self.label(f, "Demandé par le robot pour enregistrer le réseau. Laissez vide s'il n'en demande pas.",
+                   size=10, wraplength=W - 60, justify="left").pack(fill="x", padx=8, pady=(4, 0))
         self.err = tk.Label(f, text="", bg=BG, fg=WARN, font=(FONT, 11), anchor="w",
                             justify="left", wraplength=W - 60)
-        self.err.pack(fill="x", padx=8, pady=(14, 0))
+        self.err.pack(fill="x", padx=8, pady=(10, 0))
         tk.Label(f, text="Le réseau est enregistré sans couper la connexion actuelle.\n"
                  "L'ancien réseau reste disponible en secours.", bg=CARD, fg="#D2CFC5",
                  font=(FONT, 11), justify="left", padx=20, pady=16).pack(side="bottom", fill="x")
@@ -169,12 +179,13 @@ class App(tk.Tk):
         if self.status and self.status["pc"]:
             self.ssid.insert(0, self.status["pc"])
         self.psk.delete(0, "end")
+        self.sudo_pw.delete(0, "end")
         self.err.config(text="")
         self.show(self.add_frame)
         self.psk.focus_set()
 
     def save(self):
-        ssid, psk = self.ssid.get().strip(), self.psk.get()
+        ssid, psk, sudo_pw = self.ssid.get().strip(), self.psk.get(), self.sudo_pw.get()
         if not ssid:
             self.err.config(text="Le nom du réseau est vide.")
             return
@@ -185,12 +196,13 @@ class App(tk.Tk):
                                    "Tu dois être devant le robot pour reprendre la main si besoin."):
             return
         self.err.config(fg=MUTED, text="Enregistrement…")
-        threading.Thread(target=self.write_network, args=(ssid, psk), daemon=True).start()
-        self.psk.delete(0, "end")  # le mot de passe ne reste pas dans la fenêtre
+        threading.Thread(target=self.write_network, args=(ssid, psk, sudo_pw), daemon=True).start()
+        self.psk.delete(0, "end")  # les mots de passe ne restent pas dans la fenêtre
+        self.sudo_pw.delete(0, "end")
 
-    def write_network(self, ssid, psk):
+    def write_network(self, ssid, psk, sudo_pw):
         try:
-            res = core.add_network(self.host, self.user, ssid, psk)
+            res = core.add_network(self.host, self.user, ssid, psk, sudo_pw)
         except Exception as e:
             res = (False, f"erreur interne : {e}")
         self.q.put(("added", res))

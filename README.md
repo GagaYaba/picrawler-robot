@@ -18,7 +18,7 @@ cd tools/wifi
 python wifi_widget.py --host picrawler.local
 ```
 
-Le mot de passe WiFi n'est ni affiché ni enregistré sur le PC : il est envoyé au Pi par l'entrée standard de SSH.
+Le mot de passe WiFi et le mot de passe `sudo` du Pi sont saisis dans la fenêtre. Ils ne sont ni affichés ni enregistrés sur le PC : ils sont envoyés au Pi par l'entrée standard de SSH. Le champ `sudo` peut rester vide si le Pi ne demande pas de mot de passe.
 
 ## Tests
 
@@ -26,4 +26,4 @@ Le mot de passe WiFi n'est ni affiché ni enregistré sur le PC : il est envoyé
 python -m unittest discover -s tests
 ```
 
-Les tests couvrent la lecture des sorties `netsh` et `nmcli`. L'écriture sur le Pi et l'interface n'ont été vérifiées qu'à la main.
+Les tests couvrent la lecture des sorties `netsh` et `nmcli` et le passage des secrets par l'entrée standard. L'écriture sur le Pi et l'interface n'ont été vérifiées qu'à la main.

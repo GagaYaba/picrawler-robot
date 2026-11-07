@@ -28,6 +28,43 @@ class ParseTests(unittest.TestCase):
     def test_remote_list_empty(self):
         self.assertEqual(w.parse_remote_list(""), (None, []))
 
+    def test_add_network_keeps_secrets_out_of_arguments(self):
+        calls = []
+
+        def fake_run(cmd, timeout=15, windows_console=False, stdin=None):
+            calls.append((cmd, stdin))
+            return 0, ""
+
+        original = w.run
+        w.run = fake_run
+        try:
+            ok, _ = w.add_network("h", "pi", "Mon WiFi", "wifipass1234", "pi-secret")
+        finally:
+            w.run = original
+        cmd, stdin = calls[0]
+        self.assertTrue(ok)
+        self.assertNotIn("wifipass1234", " ".join(cmd))
+        self.assertNotIn("pi-secret", " ".join(cmd))
+        self.assertEqual(stdin, b"pi-secret\nwifipass1234\n")
+        self.assertIn("sudo -S", cmd[-1])
+
+    def test_add_network_without_sudo_password_uses_sudo_n(self):
+        calls = []
+
+        def fake_run(cmd, timeout=15, windows_console=False, stdin=None):
+            calls.append((cmd, stdin))
+            return 0, ""
+
+        original = w.run
+        w.run = fake_run
+        try:
+            w.add_network("h", "pi", "Mon WiFi", "wifipass1234")
+        finally:
+            w.run = original
+        cmd, stdin = calls[0]
+        self.assertIn("sudo -n", cmd[-1])
+        self.assertEqual(stdin, b"wifipass1234\n")
+
 
 if __name__ == "__main__":
     unittest.main()

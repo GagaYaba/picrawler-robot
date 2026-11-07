@@ -121,19 +121,27 @@ def get_status(host, user):
     return st
 
 
-def add_network(host, user, ssid, psk):
+def add_network(host, user, ssid, psk, sudo_password=""):
     """ÉCRIT sur le Pi : enregistre un réseau sans y basculer (la session SSH ne coupe pas).
 
-    Le mot de passe passe par l'entrée standard de ssh : jamais en argument, jamais dans un fichier.
+    Les secrets passent par l'entrée standard de ssh : jamais en argument, jamais dans un fichier.
+    Si `sudo_password` est vide, `sudo -n` est utilisé (il faut alors un sudo sans mot de passe).
     À n'appeler qu'après une action explicite de la personne devant le robot.
     """
     q = shlex.quote(ssid)
-    remote = ("IFS= read -r PSK; sudo -n nmcli connection add type wifi "
-              f"con-name {q} ssid {q} wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"$PSK\" "
-              "connection.autoconnect yes >/dev/null; rc=$?; unset PSK; exit $rc")
+    inner = ("IFS= read -r PSK; nmcli connection add type wifi "
+             f"con-name {q} ssid {q} wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"$PSK\" "
+             "connection.autoconnect yes >/dev/null; rc=$?; unset PSK; exit $rc")
+    if sudo_password:
+        # sudo lit la 1re ligne de stdin (son mot de passe), puis bash lit la 2e (le mot de passe WiFi)
+        remote = "sudo -S -p '' bash -c " + shlex.quote(inner)
+        stdin = f"{sudo_password}\n{psk}\n"
+    else:
+        remote = "sudo -n bash -c " + shlex.quote(inner)
+        stdin = f"{psk}\n"
     code, out = run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-                     f"{user}@{host}", "bash -c " + shlex.quote(remote)],
-                    timeout=30, stdin=(psk + "\n").encode("utf-8"))
+                     f"{user}@{host}", remote],
+                    timeout=30, stdin=stdin.encode("utf-8"))
     return code == 0, out
 
 
