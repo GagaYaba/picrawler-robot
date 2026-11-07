@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Petite fenêtre pour voir et ajouter les réseaux WiFi du robot PiCrawler.
+"""Fenêtre de vérification du réseau du robot PiCrawler, avec tutoriel d'ajout d'un réseau.
 
-Lecture au démarrage (comme wifi_check.py). L'ajout d'un réseau n'écrit sur le Pi
-qu'après ton clic sur le bouton de validation ET une confirmation.
-Le mot de passe n'est ni affiché, ni enregistré sur le PC.
+Lecture seule : la fenêtre compare le WiFi du PC et celui du robot, et affiche la procédure à suivre
+à la main si le réseau est inconnu du robot. Elle n'écrit rien sur le Pi et ne demande aucun mot de passe.
 
 Usage : python wifi_widget.py [--host 192.168.1.200] [--user pi]
 """
@@ -11,9 +10,9 @@ import argparse
 import queue
 import threading
 import tkinter as tk
-from tkinter import messagebox
 
 import wifi_check as core
+import wifi_tutorial
 
 BG, CARD, BTN = "#151515", "#222220", "#2C2C2A"
 TXT, MUTED, WARN, OK = "#F2F0E8", "#A8A59B", "#E8A488", "#8FCB9B"
@@ -45,16 +44,16 @@ class App(tk.Tk):
         self.q = queue.Queue()
         self.status = None
         self.main_frame = tk.Frame(self, bg=BG)
-        self.add_frame = tk.Frame(self, bg=BG)
+        self.tuto_frame = tk.Frame(self, bg=BG)
         self.build_main()
-        self.build_add()
+        self.build_tuto()
         self.show(self.main_frame)
         self.after(100, self.poll)
         self.refresh()
 
     # ---------- utilitaires ----------
     def show(self, frame):
-        for f in (self.main_frame, self.add_frame):
+        for f in (self.main_frame, self.tuto_frame):
             f.pack_forget()
         frame.pack(fill="both", expand=True, padx=18, pady=20)
 
@@ -96,17 +95,15 @@ class App(tk.Tk):
         self.known = tk.Label(f, text="", bg=CARD, fg=TXT, font=(FONT, 13), anchor="nw",
                               justify="left", padx=20, pady=14, wraplength=W - 80)
         self.known.pack(fill="x")
-        self.add_btn = tk.Button(f, text="＋  Ajouter ce réseau", command=self.open_add,
-                                 bg=CARD, fg=TXT, bd=0, relief="flat", anchor="w", padx=20,
-                                 activebackground="#2C2C2A", activeforeground=TXT,
-                                 font=(FONT, 13, "bold"), height=2, state="disabled")
-        self.add_btn.pack(side="bottom", fill="x")
-        tk.Label(f, text="Le robot reste connecté pendant l'ajout.", bg=BG, fg=MUTED,
-                 font=(FONT, 10)).pack(side="bottom", pady=(0, 8))
+        self.tuto_btn = tk.Button(f, text="Tutoriel : ajouter un nouveau réseau",
+                                  command=lambda: self.show(self.tuto_frame),
+                                  bg=CARD, fg=TXT, bd=0, relief="flat", anchor="w", padx=20,
+                                  activebackground="#2C2C2A", activeforeground=TXT,
+                                  font=(FONT, 13, "bold"), height=2)
+        self.tuto_btn.pack(side="bottom", fill="x")
 
     def refresh(self):
         self.msg.config(text="Lecture du robot…", fg=MUTED)
-        self.add_btn.config(state="disabled")
         threading.Thread(target=self.read_status, daemon=True).start()
 
     def read_status(self):
@@ -130,96 +127,53 @@ class App(tk.Tk):
             return
         self.robot_lab.config(text=st["robot"] or "pas de WiFi actif")
         self.known.config(text="\n".join(st["known"]) or "aucun")
-        self.add_btn.config(state="normal")
-        if mine and mine in st["known"]:
+        v = core.verdict(st)
+        if v == "ok":
             self.msg.config(fg=OK, text=f"Le robot connaît « {mine} ». Rien à faire.")
-        elif mine:
-            self.msg.config(fg=WARN, text="Le robot est sur un autre réseau que ton PC. "
-                            "Ajoute celui-ci pour qu'il s'y connecte.")
+        elif v == "different":
+            self.msg.config(fg=WARN, text=f"Le robot ne connaît pas « {mine} ». "
+                            "Voir le tutoriel pour l'ajouter.")
         else:
-            self.msg.config(fg=WARN, text="WiFi du PC inconnu : saisis le nom du réseau à ajouter.")
+            self.msg.config(fg=WARN, text="WiFi du PC inconnu : comparer à la main avec celui du robot.")
 
-    # ---------- écran d'ajout ----------
-    def build_add(self):
-        f = self.add_frame
-        self.header(f, "Ajouter un réseau", ("✕", lambda: self.show(self.main_frame)),
-                    ("✓", self.save))
-        self.label(f, "Nom du réseau").pack(fill="x", padx=8, pady=(18, 4))
-        p = Pill(f)
-        self.ssid = tk.Entry(p.inner, bg=CARD, fg=TXT, insertbackground=TXT, bd=0,
-                             highlightthickness=0, font=(FONT, 13))
-        self.ssid.pack(fill="both", expand=True)
-        p.pack()
-        self.label(f, "Repris du réseau actuel de ton PC.", size=10).pack(fill="x", padx=8, pady=(4, 0))
-        self.label(f, "Mot de passe WiFi").pack(fill="x", padx=8, pady=(16, 4))
-        p = Pill(f)
-        self.psk = tk.Entry(p.inner, show="•", bg=CARD, fg=TXT, insertbackground=TXT, bd=0,
-                            highlightthickness=0, font=(FONT, 13))
-        self.psk.pack(fill="both", expand=True)
-        p.pack()
-        self.label(f, "Envoyé directement au robot, jamais enregistré sur le PC.",
-                   size=10).pack(fill="x", padx=8, pady=(4, 0))
-        self.label(f, "Mot de passe du Pi (sudo)").pack(fill="x", padx=8, pady=(16, 4))
-        p = Pill(f)
-        self.sudo_pw = tk.Entry(p.inner, show="•", bg=CARD, fg=TXT, insertbackground=TXT, bd=0,
-                                highlightthickness=0, font=(FONT, 13))
-        self.sudo_pw.pack(fill="both", expand=True)
-        p.pack()
-        self.label(f, "Demandé par le robot pour enregistrer le réseau. Laissez vide s'il n'en demande pas.",
-                   size=10, wraplength=W - 60, justify="left").pack(fill="x", padx=8, pady=(4, 0))
-        self.err = tk.Label(f, text="", bg=BG, fg=WARN, font=(FONT, 11), anchor="w",
-                            justify="left", wraplength=W - 60)
-        self.err.pack(fill="x", padx=8, pady=(10, 0))
-        tk.Label(f, text="Le réseau est enregistré sans couper la connexion actuelle.\n"
-                 "L'ancien réseau reste disponible en secours.", bg=CARD, fg="#D2CFC5",
-                 font=(FONT, 11), justify="left", padx=20, pady=16).pack(side="bottom", fill="x")
+    # ---------- écran tutoriel ----------
+    def build_tuto(self):
+        f = self.tuto_frame
+        self.header(f, "Nouveau réseau", ("←", lambda: self.show(self.main_frame)))
+        box = tk.Frame(f, bg=BG)
+        box.pack(fill="both", expand=True, pady=(12, 0))
+        bar = tk.Scrollbar(box)
+        bar.pack(side="right", fill="y")
+        txt = tk.Text(box, bg=BG, fg=TXT, bd=0, highlightthickness=0, wrap="word", cursor="arrow",
+                      font=(FONT, 11), yscrollcommand=bar.set, padx=6)
+        txt.pack(side="left", fill="both", expand=True)
+        bar.config(command=txt.yview)
+        txt.tag_config("title", font=(FONT, 12, "bold"), spacing1=12, spacing3=2)
+        txt.tag_config("body", foreground=MUTED, spacing3=4)
+        txt.tag_config("cmd", font=("Consolas", 10), background=CARD, lmargin1=8, lmargin2=8,
+                       rmargin=8, spacing1=2, spacing3=2)
+        for step in wifi_tutorial.STEPS:
+            txt.insert("end", step["title"] + "\n", "title")
+            txt.insert("end", step["text"] + "\n", "body")
+            for cmd in step["commands"]:
+                txt.insert("end", cmd + "\n", "cmd")
+                btn = tk.Button(txt, text="Copier", command=lambda c=cmd: self.copy(c), bg=BTN, fg=TXT,
+                                bd=0, relief="flat", font=(FONT, 9), activebackground="#3A3A37",
+                                activeforeground=TXT)
+                txt.window_create("end", window=btn)
+                txt.insert("end", "\n")
+        txt.insert("end", "\n" + wifi_tutorial.LIMITS + "\n", "body")
+        txt.config(state="disabled")
 
-    def open_add(self):
-        self.ssid.delete(0, "end")
-        if self.status and self.status["pc"]:
-            self.ssid.insert(0, self.status["pc"])
-        self.psk.delete(0, "end")
-        self.sudo_pw.delete(0, "end")
-        self.err.config(text="")
-        self.show(self.add_frame)
-        self.psk.focus_set()
-
-    def save(self):
-        ssid, psk, sudo_pw = self.ssid.get().strip(), self.psk.get(), self.sudo_pw.get()
-        if not ssid:
-            self.err.config(text="Le nom du réseau est vide.")
-            return
-        if not 8 <= len(psk) <= 63:
-            self.err.config(text="Un mot de passe WPA fait entre 8 et 63 caractères.")
-            return
-        if not messagebox.askyesno("Confirmer", f"Enregistrer « {ssid} » sur le robot ?\n"
-                                   "Tu dois être devant le robot pour reprendre la main si besoin."):
-            return
-        self.err.config(fg=MUTED, text="Enregistrement…")
-        threading.Thread(target=self.write_network, args=(ssid, psk, sudo_pw), daemon=True).start()
-        self.psk.delete(0, "end")  # les mots de passe ne restent pas dans la fenêtre
-        self.sudo_pw.delete(0, "end")
-
-    def write_network(self, ssid, psk, sudo_pw):
-        try:
-            res = core.add_network(self.host, self.user, ssid, psk, sudo_pw)
-        except Exception as e:
-            res = (False, f"erreur interne : {e}")
-        self.q.put(("added", res))
+    def copy(self, text):
+        self.clipboard_clear()
+        self.clipboard_append(text)
 
     def poll(self):
         try:
             while True:
-                kind, data = self.q.get_nowait()
-                if kind == "status":
-                    self.apply_status(data)
-                else:
-                    ok, info = data
-                    if ok:
-                        self.show(self.main_frame)
-                        self.refresh()
-                    else:
-                        self.err.config(fg=WARN, text=f"Échec : {info or 'erreur inconnue'}")
+                _, data = self.q.get_nowait()
+                self.apply_status(data)
         except queue.Empty:
             pass
         self.after(100, self.poll)
